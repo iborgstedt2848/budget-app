@@ -1,0 +1,17 @@
+# Personal data exports — never commit an actual backup of your budget data
+*.budget-backup.json
+budget-export*.json
+*.backup.json
+
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+
+# Netlify local state (if you ever use the Netlify CLI here)
+.netlify/
