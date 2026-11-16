@@ -183,8 +183,12 @@ input[type=date]{-webkit-appearance:none;appearance:none;height:41px;line-height
 /* Trip cards */
 .trip-card{background:var(--surface);border:.5px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:12px;cursor:pointer;transition:box-shadow .15s}
 .trip-card:hover{box-shadow:0 2px 8px rgba(0,0,0,0.1)}
-.trip-card.expanded{cursor:default}
+.trip-card.expanded{cursor:pointer}
 .trip-detail{margin-top:14px;padding-top:14px;border-top:.5px solid var(--border)}
+.chart-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+.sav-leg{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;border:.5px solid var(--border-md);background:var(--surface);font-size:12px;font-family:inherit;cursor:pointer;color:var(--text);transition:all .15s}
+.sav-leg.off{color:var(--hint);background:transparent}
+.sav-leg .d{width:9px;height:9px;border-radius:2px;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -942,7 +946,7 @@ function renderBudget(){
     // on the same vertical axis.
     var chevronSpacer='<div style="font-size:12px;margin-left:4px;visibility:hidden" aria-hidden="true">▾</div>';
     return '<div class="brow" style="gap:8px"><div class="lgnd-d" style="background:'+cat.color+'80;flex-shrink:0"></div>'
-      +'<div class="bn bn-trunc">'+escHtml(sub.label)+freqLabel+extraNote+'</div>'
+      +'<div class="bn bn-trunc">'+escHtml(sub.label)+freqLabel+allocTag(subAllocOf(cat,sub))+extraNote+'</div>'
       +'<span class="badisplay" title="Double-click to edit" ondblclick="editBudgetAmt(this)" data-cat="'+cat.id+'" data-sub="'+sub.id+'" data-freq="'+sub.freq+'" data-ann="'+isAnnual+'" data-val="'+dispAmt.toFixed(2)+'" style="cursor:text;font-weight:600;font-size:14px;flex-shrink:0;white-space:nowrap">'+fmt(dispAmt,2)+(isAnnual?'/yr':'/mo')+'</span>'
       +editBtns
       +chevronSpacer
@@ -959,7 +963,7 @@ function renderBudget(){
       html+='<div class="subcat-header" data-cat-id="'+cat.id+'" draggable="true" ondragstart="catDragStart(event,\''+cat.id+'\')" ondragover="catDragOver(event,\''+cat.id+'\')" ondrop="catDrop(event,\''+cat.id+'\')" ondragend="catDragEnd()" onclick="toggleBG(\''+cat.id+'\')">'
         +'<span class="drag-handle" style="cursor:grab">⠿</span>'
         +'<div class="lgnd-d" style="background:'+cat.color+'"></div>'
-        +'<div class="subcat-header-name">'+escHtml(cat.label)+'</div>'
+        +'<div class="subcat-header-name">'+escHtml(cat.label)+catAllocTag(cat)+'</div>'
         +'<div style="font-size:13px;color:var(--hint);font-weight:400;margin-right:4px">'+fmt(headerAmt,2)+(isAnnual?'/yr':'/mo')+'</div>'
         +catEditBtns
         +'<div style="font-size:12px;color:var(--muted);margin-left:4px">'+(open?'▾':'▸')+'</div></div>';
@@ -1619,8 +1623,17 @@ function exportCSV(){
 }
 
 // ─── TRENDS ───────────────────────────────────────────────────────────────────
+function monthsAsc(){
+  var all=allMonths(),last=all[0],y=parseInt(EARLIEST_MONTH.slice(0,4)),m=parseInt(EARLIEST_MONTH.slice(5,7)),out=[];
+  while(true){var k=y+'-'+pad(m);if(k>last)break;out.push(k);m++;if(m>12){m=1;y++;}}
+  return out;
+}
+function scrollChartBox(canvasId,n,perMonth,h){
+  return '<div class="chart-scroll" id="'+canvasId+'-scroll"><div style="position:relative;height:'+h+'px;min-width:100%;width:'+(n*perMonth)+'px"><canvas id="'+canvasId+'"></canvas></div></div>';
+}
+function scrollChartToEnd(canvasId){var el=document.getElementById(canvasId+'-scroll');if(el)el.scrollLeft=el.scrollWidth;}
 function renderTrends(){
-  var months=allMonths().slice(0,12).reverse();
+  var months=monthsAsc();
   var html='<div class="card"><div class="ct">Spending lookup</div>';
   html+='<div class="toggle-row" style="margin-bottom:12px;flex-wrap:wrap">'+['day','week','month','year','custom'].map(function(p){
     var lbl={day:'Day',week:'Week',month:'Month',year:'Year',custom:'Custom'}[p];
@@ -1628,25 +1641,10 @@ function renderTrends(){
   }).join('')+'</div>';
   html+='<div id="tl-controls"></div>';
   html+='<div id="tl-result"></div></div>';
-  html+='<div class="card"><div class="ct">Monthly totals</div><div class="chart-wrap" style="height:250px"><canvas id="trend-cv"></canvas></div>';
-  html+='<div style="display:flex;gap:16px;margin-top:10px;font-size:12px;color:var(--muted)">';
-  html+='<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#639922;margin-right:4px"></span>Income</span>';
-  html+='<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#D85A30;margin-right:4px"></span>Expenses</span>';
-  html+='<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#1D9E75;margin-right:4px"></span>Saved</span></div></div>';
-  html+='<div class="card"><div class="ct">Spending by category</div><div class="chart-wrap" style="height:240px"><canvas id="cat-cv"></canvas></div></div>';
+  html+='<div class="card"><div class="ct">Spending by category</div>'+scrollChartBox('cat-cv',months.length,64,240)+'</div>';
   document.getElementById('tab-trends').innerHTML=html;
   renderTrendsLookupControls();
-  killChart('trend');killChart('cat');
-  charts['trend']=new Chart(document.getElementById('trend-cv').getContext('2d'),{
-    type:'bar',
-    data:{labels:months.map(mlabel),datasets:[
-      {label:'Income',data:months.map(function(k){return monthInc(k)||0;}),backgroundColor:'#639922cc',borderRadius:3},
-      {label:'Expenses',data:months.map(function(k){return monthSpend(k)||0;}),backgroundColor:'#D85A30cc',borderRadius:3},
-      {label:'Saved',data:months.map(function(k){return monthSav(k)||0;}),backgroundColor:'#1D9E75cc',borderRadius:3}
-    ]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{x:{ticks:{font:{size:11},maxRotation:45}},y:{ticks:{callback:function(v){return '$'+Math.round(v).toLocaleString();}}}}}
-  });
+  killChart('cat');
   var catDs=schema.filter(function(c){return catMonthly(c)>0;}).map(function(cat){
     var data=months.map(function(k){return catSpendMonth(cat.id,k);});
     return data.some(function(v){return v>0;})?{label:cat.label,data:data,backgroundColor:cat.color+'cc',borderRadius:2}:null;
@@ -1656,6 +1654,7 @@ function renderTrends(){
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{x:{stacked:true,ticks:{font:{size:11},maxRotation:45}},y:{stacked:true,ticks:{callback:function(v){return '$'+Math.round(v).toLocaleString();}}}}}
   });
+  scrollChartToEnd('cat-cv');
 }
 
 function fmtDateShort(d){var p=d.split('-');return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(p[1])-1]+' '+parseInt(p[2]);}
@@ -1789,65 +1788,270 @@ function lookupSpend(){
   resEl.innerHTML=html;
 }
 
-// ─── SAVINGS ──────────────────────────────────────────────────────────────────
+// ─── MONEY ALLOCATION ─────────────────────────────────────────────────────────
+var ALLOCS=[
+  {id:'needs',label:'Needs',color:'#D85A30'},
+  {id:'wants',label:'Wants',color:'#EF9F27'},
+  {id:'savings',label:'Savings',color:'#378ADD'},
+  {id:'investments',label:'Investments',color:'#7F77DD'}
+];
+function allocLabel(id){var a=ALLOCS.find(function(x){return x.id===id;});return a?a.label:'Unassigned';}
+function allocColor(id){var a=ALLOCS.find(function(x){return x.id===id;});return a?a.color:'#a0a09b';}
+function allocOptionsHtml(sel){
+  return '<option value="">Unassigned</option>'+ALLOCS.map(function(a){return '<option value="'+a.id+'"'+(a.id===sel?' selected':'')+'>'+a.label+'</option>';}).join('');
+}
+// A subcategory's own allocation wins; otherwise it inherits its category's.
+function subAllocOf(cat,sub){return (sub&&sub.alloc)||(cat&&cat.alloc)||'';}
+function allocTag(id){return id?'<span style="font-size:10px;color:'+allocColor(id)+';margin-left:6px">'+allocLabel(id).toLowerCase()+'</span>':'';}
+function catAllocTag(cat){
+  var seen={};cat.subs.forEach(function(sb){seen[subAllocOf(cat,sb)]=1;});
+  var keys=Object.keys(seen);
+  if(!keys.length)return allocTag(cat.alloc||'');
+  if(keys.length>1)return '<span style="font-size:10px;color:var(--hint);margin-left:6px">mixed</span>';
+  return allocTag(keys[0]);
+}
+function fmtS(n,d){return (Number(n)<-0.004?'-':'')+fmt(n,d);}
+function isInvAcct(id){
+  var a=accounts.find(function(x){return x.id===id;});
+  return !!a&&/roth|401|\bira\b|fidelity|brokerage|invest/i.test((a.label||'')+' '+(a.sub||''));
+}
+function allocCompute(from,to){
+  var B={};
+  ALLOCS.forEach(function(a){B[a.id]={id:a.id,total:0,cats:{},accts:{}};});
+  B.unassigned={id:'unassigned',total:0,cats:{},accts:{}};
+  var earned=0,spent=0,invested=0;
+  txns.forEach(function(t){
+    if(t.date<from||t.date>to)return;
+    var amt=Number(t.amount)||0;
+    if(t.type==='income'||t.type==='side'||t.type==='investment'){earned+=amt;return;}
+    if(t.type==='expense'){
+      var cat=schema.find(function(c){return c.id===t.catId;});
+      var sub=cat?cat.subs.find(function(sb){return sb.id===t.subId;}):null;
+      var al=subAllocOf(cat,sub)||'unassigned';
+      var b=B[al]||B.unassigned;
+      var info=liveCatInfo(t);
+      b.total+=amt;spent+=amt;
+      var ck=t.catId||'other';
+      var ce=b.cats[ck]||(b.cats[ck]={id:ck,label:info.cat||'Other',total:0,subs:{}});
+      ce.total+=amt;
+      var sk=t.subId||'other';
+      var se=ce.subs[sk]||(ce.subs[sk]={id:sk,label:info.sub||'Other',total:0,txns:[]});
+      se.total+=amt;se.txns.push(t);
+      return;
+    }
+    // Money moved into a Roth IRA / 401k / brokerage account counts as investing.
+    if(t.type==='transfer'&&(t.kind==='transfer'||!t.kind)&&isInvAcct(t.toAcctId)&&!isInvAcct(t.fromAcctId)){
+      var acct=accounts.find(function(x){return x.id===t.toAcctId;});
+      B.investments.total+=amt;invested+=amt;
+      var ae=B.investments.accts[t.toAcctId]||(B.investments.accts[t.toAcctId]={id:t.toAcctId,label:acct?acct.label:'Investment account',total:0,txns:[]});
+      ae.total+=amt;ae.txns.push(t);
+    }
+  });
+  // Anything earned but neither spent nor invested is savings.
+  var unspent=earned-spent-invested;
+  B.savings.total+=unspent;
+  return {earned:earned,spent:spent,invested:invested,unspent:unspent,B:B};
+}
+function monthRangeOf(k){
+  var y=parseInt(k.slice(0,4)),m=parseInt(k.slice(5,7));
+  return {from:k+'-01',to:k+'-'+pad(new Date(y,m,0).getDate())};
+}
+
+var allocMode='month',allocOffset=0,allocFrom='',allocTo='',allocOpen={};
+var savChartType='bar',savSeriesOn={income:true,savings:true,needs:true,wants:true,investments:true};
+var SAV_SERIES=[
+  {key:'income',label:'Income',color:'#639922'},
+  {key:'savings',label:'Savings',color:'#378ADD'},
+  {key:'needs',label:'Needs',color:'#D85A30'},
+  {key:'wants',label:'Wants',color:'#EF9F27'},
+  {key:'investments',label:'Investments',color:'#7F77DD'}
+];
 function buildSavings(){
-  var hysaAcct=Array.isArray(accounts)?accounts.find(function(a){return a.id==='marcusHYSA';}):null;
-  var saved=hysaAcct?Number(hysaAcct.balance||0):0;
-  var html='';
-
-  // Balance card
-  html+='<div class="card"><div class="ct">HYSA Balance</div>';
-  html+='<input type="number" id="hysa-bal" value="'+saved.toFixed(2)+'" style="font-size:28px;font-weight:700;border:none;border-bottom:2px solid var(--border-md);border-radius:0;background:transparent;color:var(--green);width:220px;padding:4px 0;height:auto" oninput="updateHYSA(this.value)">';
-  html+='</div>';
-
-  // Goal progress card
-  html+='<div class="card" id="ef-goal-card"><div class="ct">Savings goal</div><div id="ef-goal"></div></div>';
-
-  // Calculator card
-  html+='<div class="card"><div class="ct">Goal calculator</div>';
-  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">';
-  html+='<div><label class="flabel">Months of coverage</label><input type="number" id="ef-slider" value="'+(profile.efMonths||6)+'" min="1" max="36" step="1" oninput="refreshEF()"></div>';
-  html+='<div><label class="flabel">Monthly contribution ($)</label><input type="number" id="ef-contrib" value="'+(profile.efContrib||500)+'" min="0" oninput="refreshEF()"></div>';
-  html+='</div><div id="ef-miles"></div>';
-  html+='<button class="btn" style="width:100%;margin-top:12px" onclick="saveEFSettings()">Save</button></div>';
-
+  var html='<div class="card"><div class="ct">Allocation lookup</div>';
+  html+='<div class="toggle-row" style="margin-bottom:12px;flex-wrap:wrap">'+['month','year','custom'].map(function(p){
+    var lbl={month:'Month',year:'Year',custom:'Custom'}[p];
+    return '<button id="al-btn-'+p+'" class="toggle-btn toggle-btn-fixed'+(allocMode===p?' active':'')+'" onclick="setAllocMode(\''+p+'\')">'+lbl+'</button>';
+  }).join('')+'</div>';
+  html+='<div id="al-controls"></div><div id="al-result"></div></div>';
+  html+='<div class="card"><div class="rb" style="margin-bottom:10px"><div class="ct" style="margin:0">Monthly totals</div>'
+    +'<div class="toggle-row" style="margin:0"><button id="sav-t-bar" class="toggle-btn'+(savChartType==='bar'?' active':'')+'" onclick="setSavChartType(\'bar\')">Bar</button>'
+    +'<button id="sav-t-line" class="toggle-btn'+(savChartType==='line'?' active':'')+'" onclick="setSavChartType(\'line\')">Line</button></div></div>'
+    +'<div id="sav-legend" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div><div id="sav-box"></div></div>';
   document.getElementById('tab-savings').innerHTML=html;
-  refreshEF();
+  renderAllocControls();
+  renderSavLegend();
+  renderSavChart();
 }
-
-function updateHYSA(val){
-  var v=parseFloat(val)||0;
-  var hysa=Array.isArray(accounts)?accounts.find(function(a){return a.id==='marcusHYSA';}):null;
-  if(hysa)hysa.balance=v;
-  persist();refreshEF();
+function allocRange(){
+  if(allocMode==='custom')return {from:allocFrom,to:allocTo};
+  var r=trendsRangeFor(allocMode,allocOffset),min=EARLIEST_MONTH+'-01';
+  return {from:r.from<min?min:r.from,to:r.to,label:r.label};
 }
-function saveEFSettings(){
-  var months=parseInt(document.getElementById('ef-slider').value)||6;
-  var contrib=parseFloat(document.getElementById('ef-contrib').value)||0;
-  profile.efMonths=months;profile.efContrib=contrib;
-  persist();toast('Saved!');
+function setAllocMode(m){
+  allocMode=m;allocOffset=0;
+  if(m==='custom'&&!allocFrom){var r=trendsRangeFor('month',0);allocFrom=r.from;allocTo=r.to;}
+  ['month','year','custom'].forEach(function(k){
+    var btn=document.getElementById('al-btn-'+k);
+    if(btn)btn.className='toggle-btn toggle-btn-fixed'+(k===m?' active':'');
+  });
+  renderAllocControls();
 }
-
-function refreshEF(){
-  var slider=document.getElementById('ef-slider');if(!slider)return;
-  var months=parseInt(slider.value)||6;if(months<1)months=1;
-  var contrib=parseFloat(document.getElementById('ef-contrib').value)||0;
-  var hysaAcct=Array.isArray(accounts)?accounts.find(function(a){return a.id==='marcusHYSA';}):null;
-  var saved=hysaAcct?Number(hysaAcct.balance||0):0;
-  var monthly=totalBudgetedMo(),goal=Math.round(monthly*months);
-  var remaining=Math.max(0,goal-saved),pct=Math.min(100,goal>0?Math.round(saved/goal*100):0);
-  var moToGoal=contrib>0?Math.ceil(remaining/contrib):null;
-  var goalEl=document.getElementById('ef-goal');
-  if(goalEl){
-    goalEl.innerHTML=(moToGoal&&moToGoal>0?'<div style="font-size:13px;color:var(--muted);margin-bottom:10px">At '+fmt(contrib)+'/mo, you will reach your savings goal in <strong style="color:var(--green)">'+moToGoal+' months</strong> (~'+(moToGoal/12).toFixed(1)+' years).</div>':'')
-      +'<div class="efbar"><div class="efill" style="width:'+pct+'%"></div></div>'
-      +'<div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:4px"><span>'+fmt(saved)+'</span><span>'+fmt(goal)+'</span></div>'
-      +(pct>=100?'<div style="margin-top:8px;color:var(--green);font-weight:500">Goal reached!</div>':'');
+function allocNav(dir){
+  var fwdCap=allocMode==='year'?furthestYearOffset():furthestMonthOffset();
+  var cand=Math.min(fwdCap,allocOffset+dir);
+  var r=trendsRangeFor(allocMode,cand);
+  if(r.to>=EARLIEST_MONTH+'-01')allocOffset=cand;
+  renderAllocControls();
+}
+function renderAllocControls(){
+  var el=document.getElementById('al-controls');if(!el)return;
+  if(allocMode==='custom'){
+    el.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">'
+      +'<div><label class="flabel">From</label><input type="date" id="al-from" min="'+EARLIEST_MONTH+'-01" value="'+allocFrom+'"></div>'
+      +'<div><label class="flabel">To</label><input type="date" id="al-to" min="'+EARLIEST_MONTH+'-01" value="'+allocTo+'"></div></div>'
+      +'<button class="btn" onclick="allocLookupCustom()" style="width:100%;margin-bottom:12px">Look up</button>';
+  } else {
+    var r=allocRange();
+    var fwdCap=allocMode==='year'?furthestYearOffset():furthestMonthOffset();
+    var atPresent=allocOffset>=fwdCap;
+    el.innerHTML='<div class="rb" style="margin-bottom:12px">'
+      +'<button class="btn btn-o btn-sm" onclick="allocNav(-1)">←</button>'
+      +'<div style="font-weight:600;font-size:14px">'+r.label+'</div>'
+      +'<button class="btn btn-o btn-sm" onclick="allocNav(1)"'+(atPresent?' disabled style="opacity:.35;cursor:default"':'')+'>→</button></div>';
   }
-  var ms=[0.25,0.5,0.75,1].map(function(p){return{label:Math.round(p*100)+'%',mo:contrib>0?Math.ceil(Math.max(0,goal*p-saved)/contrib):null};});
-  var milesEl=document.getElementById('ef-miles');
-  if(milesEl)milesEl.innerHTML='<div class="ct" style="margin-bottom:8px">Milestones</div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">'
-    +ms.map(function(m){return '<div style="background:var(--bg);border:.5px solid var(--border);border-radius:var(--rs);padding:12px;text-align:center"><div style="font-size:20px;font-weight:700">'+m.label+'</div><div style="font-size:12px;color:var(--muted);margin-top:4px">'+(m.mo!==null?(m.mo<=0?'Done!':m.mo+' mo'):'—')+'</div></div>';}).join('')+'</div>';
+  renderAllocResult();
+}
+function allocLookupCustom(){
+  allocFrom=document.getElementById('al-from').value;
+  allocTo=document.getElementById('al-to').value;
+  renderAllocResult();
+}
+function toggleAlloc(key){allocOpen[key]=!allocOpen[key];renderAllocResult();}
+function allocTxnRows(list,editFn){
+  return list.slice().sort(function(a,b){return b.date.localeCompare(a.date);}).map(function(t){
+    var idx=txns.indexOf(t),d=new Date(t.date+'T12:00:00'),ds=(d.getMonth()+1)+'/'+d.getDate();
+    return '<div class="brow" style="padding:7px 0;cursor:pointer" onclick="event.stopPropagation();'+editFn+'('+idx+')"><div class="bn" style="font-size:13px">'+escHtml(t.desc||'—')+'</div>'
+      +'<div style="color:var(--muted);font-size:12px;width:32px;flex-shrink:0">'+ds+'</div>'
+      +'<div style="font-weight:600;font-size:13px;width:66px;flex-shrink:0;text-align:right">'+fmt(t.amount,2)+'</div></div>';
+  }).join('');
+}
+function allocCatRows(b){
+  var h='',cats=Object.keys(b.cats).map(function(k){return b.cats[k];}).sort(function(x,y){return y.total-x.total;});
+  cats.forEach(function(ce){
+    var ck='c|'+b.id+'|'+ce.id,open=!!allocOpen[ck],pct=b.total>0?Math.round(ce.total/b.total*100):0;
+    h+='<div class="bva-row" style="cursor:pointer" onclick="event.stopPropagation();toggleAlloc(\''+ck+'\')"><div class="bva-name">'+escHtml(ce.label)+'</div>'
+      +'<div class="bva-bar-wrap"><div class="bva-bar" style="width:'+pct+'%;background:'+allocColor(b.id)+'"></div></div>'
+      +'<div class="bva-nums">'+fmt(ce.total)+' ('+pct+'%)</div>'
+      +'<div style="font-size:11px;color:var(--hint);margin-left:2px;flex-shrink:0">'+(open?'▾':'▸')+'</div></div>';
+    if(open){
+      h+='<div style="padding:0 0 6px 12px">';
+      Object.keys(ce.subs).map(function(k){return ce.subs[k];}).sort(function(x,y){return y.total-x.total;}).forEach(function(se){
+        var sk='s|'+b.id+'|'+ce.id+'|'+se.id,sOpen=!!allocOpen[sk];
+        h+='<div class="bva-row" style="cursor:pointer;padding:8px 0" onclick="event.stopPropagation();toggleAlloc(\''+sk+'\')"><div class="bva-name" style="font-size:13px;font-weight:400">'+escHtml(se.label)+'</div>'
+          +'<div class="bva-nums" style="color:var(--text);margin-left:auto">'+fmt(se.total)+'</div>'
+          +'<div style="font-size:10px;color:var(--hint);margin-left:6px;flex-shrink:0">'+(sOpen?'▾':'▸')+'</div></div>';
+        if(sOpen)h+='<div style="padding:0 0 6px 12px">'+allocTxnRows(se.txns,'openEditTxnModal')+'</div>';
+      });
+      h+='</div>';
+    }
+  });
+  return h;
+}
+function renderAllocResult(){
+  var resEl=document.getElementById('al-result');if(!resEl)return;
+  var rg=allocRange();
+  if(!rg.from||!rg.to){resEl.innerHTML='<div style="color:var(--muted);font-size:13px">Pick both dates.</div>';return;}
+  if(rg.from>rg.to){resEl.innerHTML='<div style="color:var(--red);font-size:13px">"From" must be on or before "To".</div>';return;}
+  var res=allocCompute(rg.from,rg.to),earned=res.earned;
+  var html='<div style="font-size:24px;font-weight:700;color:var(--green)">'+fmt(earned)+'</div>';
+  html+='<div style="font-size:12px;color:var(--muted);margin-bottom:10px">money earned · '+fmtDate(rg.from)+' – '+fmtDate(rg.to)+'</div>';
+  var rows=Object.keys(res.B).map(function(k){return res.B[k];}).filter(function(b){return b.id!=='unassigned'||Math.abs(b.total)>0.005;})
+    .sort(function(x,y){return y.total-x.total;});
+  rows.forEach(function(b){
+    var pct=earned>0?Math.round(b.total/earned*100):0,open=!!allocOpen['a|'+b.id],neg=b.total<-0.004;
+    var barW=Math.max(0,Math.min(100,pct));
+    html+='<div class="bva-row" style="cursor:pointer" onclick="toggleAlloc(\'a|'+b.id+'\')"><div class="bva-name">'+allocLabel(b.id)+'</div>'
+      +'<div class="bva-bar-wrap"><div class="bva-bar" style="width:'+barW+'%;background:'+allocColor(b.id)+'"></div></div>'
+      +'<div class="bva-nums"'+(neg?' style="color:var(--red)"':'')+'>'+fmtS(b.total)+' ('+pct+'%)</div>'
+      +'<div style="font-size:11px;color:var(--hint);margin-left:2px;flex-shrink:0">'+(open?'▾':'▸')+'</div></div>';
+    if(open){
+      html+='<div style="padding:0 0 6px 12px">';
+      if(b.id==='savings'){
+        html+='<div class="bva-row" style="padding:8px 0"><div class="bva-name" style="font-size:13px;width:auto;max-width:none">Unspent income</div>'
+          +'<div class="bva-nums" style="margin-left:auto;'+(res.unspent<-0.004?'color:var(--red)':'color:var(--text)')+'">'+fmtS(res.unspent)+'</div><div style="width:16px"></div></div>';
+      }
+      if(b.id==='investments'){
+        Object.keys(b.accts).map(function(k){return b.accts[k];}).sort(function(x,y){return y.total-x.total;}).forEach(function(ae){
+          var ak='i|'+ae.id,aOpen=!!allocOpen[ak];
+          html+='<div class="bva-row" style="cursor:pointer" onclick="event.stopPropagation();toggleAlloc(\''+ak+'\')"><div class="bva-name">'+escHtml(ae.label)+'</div>'
+            +'<div class="bva-bar-wrap" style="background:transparent"></div>'
+            +'<div class="bva-nums" style="color:var(--text)">'+fmt(ae.total)+'</div>'
+            +'<div style="font-size:11px;color:var(--hint);margin-left:2px;flex-shrink:0">'+(aOpen?'▾':'▸')+'</div></div>';
+          if(aOpen)html+='<div style="padding:0 0 6px 12px">'+allocTxnRows(ae.txns,'openEditActivityModal')+'</div>';
+        });
+      }
+      var catHtml=allocCatRows(b);
+      html+=catHtml;
+      if(b.id==='unassigned')html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">These subcategories have no money allocation yet. Set one with the ✎ button in the Budget tab.</div>';
+      if(!catHtml&&b.id!=='savings'&&b.id!=='investments')html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">Nothing here for this period.</div>';
+      html+='</div>';
+    }
+  });
+  resEl.innerHTML=html;
+}
+
+// Monthly totals chart (income + the four allocation buckets)
+function renderSavLegend(){
+  var el=document.getElementById('sav-legend');if(!el)return;
+  el.innerHTML=SAV_SERIES.map(function(sr){
+    var on=savSeriesOn[sr.key];
+    return '<button type="button" class="sav-leg'+(on?'':' off')+'" onclick="toggleSavSeries(\''+sr.key+'\')"><span class="d" style="background:'+(on?sr.color:'var(--hint)')+'"></span>'+sr.label+'</button>';
+  }).join('');
+}
+function toggleSavSeries(key){
+  savSeriesOn[key]=!savSeriesOn[key];
+  renderSavLegend();
+  var ch=charts['sav'];
+  if(ch){
+    var i=SAV_SERIES.findIndex(function(sr){return sr.key===key;});
+    ch.setDatasetVisibility(i,!!savSeriesOn[key]);
+    ch.update();
+  }
+}
+function setSavChartType(t){
+  savChartType=t;
+  var b1=document.getElementById('sav-t-bar'),b2=document.getElementById('sav-t-line');
+  if(b1)b1.className='toggle-btn'+(t==='bar'?' active':'');
+  if(b2)b2.className='toggle-btn'+(t==='line'?' active':'');
+  renderSavChart();
+}
+function renderSavChart(){
+  var box=document.getElementById('sav-box');if(!box)return;
+  var months=monthsAsc();
+  box.innerHTML=scrollChartBox('sav-cv',months.length,savChartType==='bar'?90:70,260);
+  var rows=months.map(function(k){var r=monthRangeOf(k);return allocCompute(r.from,r.to);});
+  var val={
+    income:function(r){return r.earned;},
+    savings:function(r){return r.B.savings.total;},
+    needs:function(r){return r.B.needs.total;},
+    wants:function(r){return r.B.wants.total;},
+    investments:function(r){return r.B.investments.total;}
+  };
+  var isLine=savChartType==='line';
+  var datasets=SAV_SERIES.map(function(sr){
+    var d={label:sr.label,data:rows.map(val[sr.key]),hidden:!savSeriesOn[sr.key]};
+    if(isLine){d.borderColor=sr.color;d.backgroundColor=sr.color+'33';d.tension=0.3;d.pointRadius=3;d.borderWidth=2;d.fill=false;}
+    else{d.backgroundColor=sr.color+'cc';d.borderRadius=3;}
+    return d;
+  });
+  killChart('sav');
+  charts['sav']=new Chart(document.getElementById('sav-cv').getContext('2d'),{
+    type:isLine?'line':'bar',
+    data:{labels:months.map(mlabel),datasets:datasets},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{font:{size:11},maxRotation:45}},y:{ticks:{callback:function(v){return (v<0?'-$':'$')+Math.abs(Math.round(v)).toLocaleString();}}}}}
+  });
+  scrollChartToEnd('sav-cv');
 }
 
 // ─── NET WORTH ────────────────────────────────────────────────────────────────
@@ -2151,7 +2355,7 @@ function renderTravel(){
       var tripTxns=txns.filter(function(t){return t.tripId===trip.id&&t.type==='expense';});
       var total=tripTxns.reduce(function(s,t){return s+Number(t.amount);},0);
       var isExp=expandedTrip===trip.id;
-      html+='<div class="trip-card'+(isExp?' expanded':'')+'" onclick="'+(isExp?'':'toggleTrip(\''+trip.id+'\')')+'">';
+      html+='<div class="trip-card'+(isExp?' expanded':'')+'" onclick="toggleTrip(\''+trip.id+'\')">';
       html+='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">';
       html+='<div><div style="font-size:16px;font-weight:600">'+escHtml(trip.name)+'</div>';
       if(trip.location)html+='<div style="font-size:13px;color:var(--muted);margin-top:2px">'+escHtml(trip.location)+'</div>';
@@ -2186,7 +2390,9 @@ function renderTravel(){
         // All of this trip's transactions in chronological order, same row format as
         // Tracker → Transactions (category pill, description, amount, date).
         if(tripTxns.length){
-          html+='<div class="ct" style="margin-top:14px">All transactions</div>';
+          var allOpen=!!tripAllOpen[trip.id];
+          html+='<div class="ct" style="margin-top:14px;cursor:pointer;user-select:none" onclick="event.stopPropagation();toggleTripAll(\''+trip.id+'\')">See all transactions '+(allOpen?'▾':'▸')+'</div>';
+          if(allOpen){
           tripTxns.slice().sort(function(a,b){return b.date.localeCompare(a.date)||txns.indexOf(b)-txns.indexOf(a);}).forEach(function(t){
             var idx=txns.indexOf(t),info=liveCatInfo(t),col=info.color;
             var d=new Date(t.date+'T12:00:00'),ds=(d.getMonth()+1)+'/'+(d.getDate());
@@ -2200,14 +2406,12 @@ function renderTravel(){
               +'<span class="tdel t-del" onclick="delTxn('+idx+')" title="Delete">&times;</span>'
               +'</div>';
           });
+          }
         }
         html+='<div style="display:flex;gap:8px;margin-top:14px">';
-        html+='<button class="btn btn-o btn-sm" onclick="event.stopPropagation();toggleTrip(\''+trip.id+'\')">Collapse</button>';
         html+='<button class="btn btn-o btn-sm" onclick="event.stopPropagation();openEditTripModal(\''+trip.id+'\')">Edit trip</button>';
         html+='<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteTrip(\''+trip.id+'\')">Delete trip</button>';
         html+='</div></div>';
-      } else {
-        html+='<div style="font-size:12px;color:var(--muted);margin-top:8px">Tap to expand</div>';
       }
       html+='</div>';
     });
@@ -2215,7 +2419,9 @@ function renderTravel(){
   document.getElementById('tab-travel').innerHTML=html;
 }
 
-function toggleTrip(id){expandedTrip=expandedTrip===id?null:id;renderTravel();}
+var tripAllOpen={};
+function toggleTrip(id){expandedTrip=expandedTrip===id?null:id;tripAllOpen[id]=false;renderTravel();}
+function toggleTripAll(id){tripAllOpen[id]=!tripAllOpen[id];renderTravel();}
 var tripCatOpen={};
 function toggleTripCat(tripId,ei){var key=tripId+'|'+ei;tripCatOpen[key]=!tripCatOpen[key];renderTravel();}
 
@@ -2517,11 +2723,13 @@ function openAddCatModal(presetFixed){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
     +'<div><label class="flabel">Color</label><input type="color" id="m-color" value="#7F77DD" style="width:60px;height:41px"></div>'
     +'<div><label class="flabel">Fixed / Variable</label><select id="m-fixed"><option value="0"'+(presetFixed==='1'?'':' selected')+'>Variable</option><option value="1"'+(presetFixed==='1'?' selected':'')+'>Fixed</option></select></div></div>'
+    +'<div><label class="flabel">Money allocation</label><select id="m-alloc">'+allocOptionsHtml('')+'</select></div>'
     +'</div><div class="modal-footer"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn" onclick="confirmAddCat()">Add</button></div>');
 }
 function confirmAddCat(){
   var name=document.getElementById('m-name').value.trim();if(!name){alert('Enter a name.');return;}
   var newCat={id:uid(),label:name,color:document.getElementById('m-color').value,fixed:document.getElementById('m-fixed').value==='1',subs:[]};
+  var newAlloc=document.getElementById('m-alloc').value;if(newAlloc)newCat.alloc=newAlloc;
   applyStructuralChange(function(cats){cats.push(clone(newCat));});
   persist();closeModal();renderBudget();toast('Category added!');
 }
@@ -2532,12 +2740,20 @@ function openEditCatModal(ci){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
     +'<div><label class="flabel">Color</label><input type="color" id="m-color" value="'+cat.color+'" style="width:60px;height:41px"></div>'
     +'<div><label class="flabel">Fixed / Variable</label><select id="m-fixed"><option value="0"'+(cat.fixed?'':' selected')+'>Variable</option><option value="1"'+(cat.fixed?' selected':'')+'>Fixed</option></select></div></div>'
+    +'<div><label class="flabel">Money allocation (applies to all its subcategories)</label><select id="m-alloc">'+allocOptionsHtml(cat.alloc||'')+'</select></div>'
     +'</div><div class="modal-footer"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn" onclick="confirmEditCat('+ci+')">Save</button></div>');
 }
 function confirmEditCat(ci){
   var name=document.getElementById('m-name').value.trim();if(!name){alert('Enter a name.');return;}
   var catId=schema[ci].id,color=document.getElementById('m-color').value,fixed=document.getElementById('m-fixed').value==='1';
-  applyStructuralChange(function(cats){var c=cats.find(function(x){return x.id===catId;});if(c){c.label=name;c.color=color;c.fixed=fixed;}});
+  var newAl=document.getElementById('m-alloc').value;
+  applyStructuralChange(function(cats){var c=cats.find(function(x){return x.id===catId;});if(c){c.label=name;c.color=color;c.fixed=fixed;
+    // Changing the category's allocation autofills every subcategory under it.
+    // Leaving it unchanged keeps any per-subcategory overrides intact.
+    if(newAl!==(c.alloc||'')){
+      if(newAl)c.alloc=newAl;else delete c.alloc;
+      c.subs.forEach(function(sb){if(newAl)sb.alloc=newAl;else delete sb.alloc;});
+    }}});
   persist();closeModal();renderBudget();toast('Updated!');
 }
 function deleteCat(ci){
@@ -2555,6 +2771,7 @@ function openAddSubModal(ci){
     +'<div><label class="flabel">Frequency</label><select id="m-freq"><option value="monthly">Monthly</option><option value="annual">Annual</option></select></div></div>'
     +'<div id="m-extra-toggle-wrap"><button type="button" class="btn btn-o btn-sm" onclick="showExtraFeeField()">+ Add annual fee</button></div>'
     +'<div id="m-extra-wrap" style="display:none"><label class="flabel">Annual fee ($)</label><input type="number" id="m-extra" min="0" placeholder="0"></div>'
+    +'<div><label class="flabel">Money allocation</label><select id="m-alloc">'+allocOptionsHtml(schema[ci].alloc||'')+'</select></div>'
     +'</div><div class="modal-footer"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn" onclick="confirmAddSub('+ci+')">Add</button></div>');
 }
 function showExtraFeeField(){
@@ -2568,6 +2785,7 @@ function confirmAddSub(ci){
   var catId=schema[ci].id;
   var newSub={id:uid(),label:name,amount:parseFloat(document.getElementById('m-amt').value)||0,freq:document.getElementById('m-freq').value};
   if(extra>0)newSub.annualExtra=extra;
+  var subAl=document.getElementById('m-alloc').value;if(subAl)newSub.alloc=subAl;
   applyStructuralChange(function(cats){var c=cats.find(function(x){return x.id===catId;});if(c)c.subs.push(clone(newSub));});
   persist();closeModal();renderBudget();toast('Added!');
 }
@@ -2587,6 +2805,7 @@ function openEditSubModal(ci,si){
     +'<div><label class="flabel">Frequency</label><select id="m-freq"><option value="monthly"'+(sub.freq==='monthly'?' selected':'')+'>Monthly</option><option value="annual"'+(sub.freq==='annual'?' selected':'')+'>Annual</option></select></div></div>'
     +'<div id="m-extra-toggle-wrap" style="'+(hasExtra?'display:none':'')+'"><button type="button" class="btn btn-o btn-sm" onclick="showExtraFeeField()">+ Add annual fee</button></div>'
     +'<div id="m-extra-wrap" style="'+(hasExtra?'':'display:none')+'"><label class="flabel">Annual fee ($)</label><input type="number" id="m-extra" value="'+(sub.annualExtra||0)+'" min="0"></div>'
+    +'<div><label class="flabel">Money allocation</label><select id="m-alloc">'+allocOptionsHtml(subAllocOf(schema[ci],sub))+'</select></div>'
     +'</div><div class="modal-footer"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn" onclick="confirmEditSub('+ci+','+si+')">Save</button></div>');
 }
 function confirmEditSub(ci,si){
@@ -2602,6 +2821,8 @@ function confirmEditSub(ci,si){
   // canonical unit for its (possibly just-changed) frequency.
   var canonicalAmt=isAnnual?(freq==='annual'?entered:entered/mult):(freq==='annual'?entered*mult:entered);
   sub.label=name;sub.amount=canonicalAmt;sub.freq=freq;
+  var subAl2=document.getElementById('m-alloc').value;
+  if(subAl2)sub.alloc=subAl2;else delete sub.alloc;
   if(extra>0)sub.annualExtra=extra;else delete sub.annualExtra;
   persist();closeModal();renderBudget();toast('Updated!');
 }
