@@ -1824,10 +1824,22 @@ function allocCompute(from,to){
   var B={needs:{id:'needs',total:0,cats:{}},wants:{id:'wants',total:0,cats:{}},unassigned:{id:'unassigned',total:0,cats:{}},
          savings:{id:'savings',total:0,cats:{}},investments:{id:'investments',total:0,cats:{},accts:{}}};
   var earned=0,spent=0,invested=0;
+  function addInv(acctId,t,amt){
+    var acct=accounts.find(function(x){return x.id===acctId;});
+    B.investments.total+=amt;invested+=amt;
+    var ae=B.investments.accts[acctId]||(B.investments.accts[acctId]={id:acctId,label:acct?acct.label:'Invested account',total:0,txns:[]});
+    ae.total+=amt;ae.txns.push(t);
+  }
   txns.forEach(function(t){
     if(t.date<from||t.date>to)return;
     var amt=Number(t.amount)||0;
-    if(t.type==='income'||t.type==='side'||t.type==='investment'){earned+=amt;return;}
+    if(t.type==='income'||t.type==='side'||t.type==='investment'){
+      earned+=amt;
+      // Income logged against a source that auto-adds to an Invested account (e.g. a 401k contribution)
+      var la=incLinkedAccount(t.subId);
+      if(la&&la.liquid===false)addInv(la.id,t,amt);
+      return;
+    }
     if(t.type==='expense'){
       var cat=schema.find(function(c){return c.id===t.catId;});
       var sub=cat?cat.subs.find(function(sb){return sb.id===t.subId;}):null;
@@ -1845,10 +1857,7 @@ function allocCompute(from,to){
     }
     // Money moved into any account whose type is Invested counts as investing.
     if(t.type==='transfer'&&(t.kind==='transfer'||!t.kind)&&isInvAcct(t.toAcctId)&&!isInvAcct(t.fromAcctId)){
-      var acct=accounts.find(function(x){return x.id===t.toAcctId;});
-      B.investments.total+=amt;invested+=amt;
-      var ae=B.investments.accts[t.toAcctId]||(B.investments.accts[t.toAcctId]={id:t.toAcctId,label:acct?acct.label:'Invested account',total:0,txns:[]});
-      ae.total+=amt;ae.txns.push(t);
+      addInv(t.toAcctId,t,amt);
     }
   });
   // Savings = earned - needs - wants (untagged spending is subtracted too so nothing disappears).
@@ -1936,7 +1945,7 @@ function toggleAlloc(key){allocOpen[key]=!allocOpen[key];renderAllocResult();}
 function allocTxnRows(list,editFn){
   return list.slice().sort(function(a,b){return b.date.localeCompare(a.date);}).map(function(t){
     var idx=txns.indexOf(t),d=new Date(t.date+'T12:00:00'),ds=(d.getMonth()+1)+'/'+d.getDate();
-    return '<div class="brow" style="padding:7px 0;cursor:pointer" onclick="event.stopPropagation();'+editFn+'('+idx+')"><div class="bn" style="font-size:13px">'+escHtml(t.desc||'—')+'</div>'
+    return '<div class="brow" style="padding:7px 0;cursor:pointer" onclick="event.stopPropagation();'+(t.type==='transfer'?'openEditActivityModal':'openEditTxnModal')+'('+idx+')"><div class="bn" style="font-size:13px">'+escHtml(t.desc||'—')+'</div>'
       +'<div style="color:var(--muted);font-size:12px;width:32px;flex-shrink:0">'+ds+'</div>'
       +'<div style="font-weight:600;font-size:13px;width:66px;flex-shrink:0;text-align:right">'+fmt(t.amount,2)+'</div></div>';
   }).join('');
@@ -1994,13 +2003,14 @@ function renderAllocResult(){
         html+=allocSubRow(pk,p.label,p.color,p.total,earned,pOpen,p.clickable);
         if(p.k==='investments'&&pOpen){
           html+='<div style="padding:0 0 6px 12px">';
-          var accts=Object.keys(B.investments.accts).map(function(k){return B.investments.accts[k];}).sort(function(x,y){return y.total-x.total;});
-          if(!accts.length)html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">No transfers into Invested accounts this period.</div>';
+          var accts=accounts.filter(function(a){return a.liquid===false;}).map(function(a){return B.investments.accts[a.id]||{id:a.id,label:a.label,total:0,txns:[]};})
+            .sort(function(x,y){return y.total-x.total;});
+          if(!accts.length)html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">No accounts are set to type Invested yet.</div>';
           accts.forEach(function(ae){
-            var ak='i|'+ae.id,aOpen=!!allocOpen[ak];
-            html+='<div class="bva-row" style="cursor:pointer;padding:8px 0" onclick="event.stopPropagation();toggleAlloc(\''+ak+'\')"><div class="bva-name" style="font-size:13px;font-weight:400">'+escHtml(ae.label)+'</div>'
+            var ak='i|'+ae.id,has=ae.txns.length>0,aOpen=has&&!!allocOpen[ak];
+            html+='<div class="bva-row" style="padding:8px 0;'+(has?'cursor:pointer':'opacity:.55')+'"'+(has?' onclick="event.stopPropagation();toggleAlloc(\''+ak+'\')"':'')+'><div class="bva-name" style="font-size:13px;font-weight:400">'+escHtml(ae.label)+'</div>'
               +'<div class="bva-nums" style="color:var(--text);margin-left:auto">'+fmt(ae.total)+'</div>'
-              +'<div style="font-size:10px;color:var(--hint);margin-left:6px;flex-shrink:0">'+(aOpen?'▾':'▸')+'</div></div>';
+              +'<div style="font-size:10px;color:var(--hint);margin-left:6px;flex-shrink:0;width:9px">'+(has?(aOpen?'▾':'▸'):'')+'</div></div>';
             if(aOpen)html+='<div style="padding:0 0 6px 12px">'+allocTxnRows(ae.txns,'openEditActivityModal')+'</div>';
           });
           html+='</div>';
