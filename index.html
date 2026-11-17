@@ -2003,14 +2003,13 @@ function renderAllocResult(){
         html+=allocSubRow(pk,p.label,p.color,p.total,earned,pOpen,p.clickable);
         if(p.k==='investments'&&pOpen){
           html+='<div style="padding:0 0 6px 12px">';
-          var accts=accounts.filter(function(a){return a.liquid===false;}).map(function(a){return B.investments.accts[a.id]||{id:a.id,label:a.label,total:0,txns:[]};})
-            .sort(function(x,y){return y.total-x.total;});
-          if(!accts.length)html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">No accounts are set to type Invested yet.</div>';
+          var accts=Object.keys(B.investments.accts).map(function(k){return B.investments.accts[k];}).sort(function(x,y){return y.total-x.total;});
+          if(!accts.length)html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">Nothing added to Invested accounts this period.</div>';
           accts.forEach(function(ae){
-            var ak='i|'+ae.id,has=ae.txns.length>0,aOpen=has&&!!allocOpen[ak];
-            html+='<div class="bva-row" style="padding:8px 0;'+(has?'cursor:pointer':'opacity:.55')+'"'+(has?' onclick="event.stopPropagation();toggleAlloc(\''+ak+'\')"':'')+'><div class="bva-name" style="font-size:13px;font-weight:400">'+escHtml(ae.label)+'</div>'
+            var ak='i|'+ae.id,aOpen=!!allocOpen[ak];
+            html+='<div class="bva-row" style="padding:8px 0;cursor:pointer" onclick="event.stopPropagation();toggleAlloc(\''+ak+'\')"><div class="bva-name" style="font-size:13px;font-weight:400">'+escHtml(ae.label)+'</div>'
               +'<div class="bva-nums" style="color:var(--text);margin-left:auto">'+fmt(ae.total)+'</div>'
-              +'<div style="font-size:10px;color:var(--hint);margin-left:6px;flex-shrink:0;width:9px">'+(has?(aOpen?'▾':'▸'):'')+'</div></div>';
+              +'<div style="font-size:10px;color:var(--hint);margin-left:6px;flex-shrink:0;width:9px">'+(aOpen?'▾':'▸')+'</div></div>';
             if(aOpen)html+='<div style="padding:0 0 6px 12px">'+allocTxnRows(ae.txns,'openEditActivityModal')+'</div>';
           });
           html+='</div>';
