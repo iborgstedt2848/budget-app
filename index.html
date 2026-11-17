@@ -946,7 +946,7 @@ function renderBudget(){
     // on the same vertical axis.
     var chevronSpacer='<div style="font-size:12px;margin-left:4px;visibility:hidden" aria-hidden="true">▾</div>';
     return '<div class="brow" style="gap:8px"><div class="lgnd-d" style="background:'+cat.color+'80;flex-shrink:0"></div>'
-      +'<div class="bn bn-trunc">'+escHtml(sub.label)+freqLabel+allocTag(subAllocOf(cat,sub))+extraNote+'</div>'
+      +'<div class="bn bn-trunc">'+escHtml(sub.label)+extraNote+'</div>'
       +'<span class="badisplay" title="Double-click to edit" ondblclick="editBudgetAmt(this)" data-cat="'+cat.id+'" data-sub="'+sub.id+'" data-freq="'+sub.freq+'" data-ann="'+isAnnual+'" data-val="'+dispAmt.toFixed(2)+'" style="cursor:text;font-weight:600;font-size:14px;flex-shrink:0;white-space:nowrap">'+fmt(dispAmt,2)+(isAnnual?'/yr':'/mo')+'</span>'
       +editBtns
       +chevronSpacer
@@ -963,7 +963,7 @@ function renderBudget(){
       html+='<div class="subcat-header" data-cat-id="'+cat.id+'" draggable="true" ondragstart="catDragStart(event,\''+cat.id+'\')" ondragover="catDragOver(event,\''+cat.id+'\')" ondrop="catDrop(event,\''+cat.id+'\')" ondragend="catDragEnd()" onclick="toggleBG(\''+cat.id+'\')">'
         +'<span class="drag-handle" style="cursor:grab">⠿</span>'
         +'<div class="lgnd-d" style="background:'+cat.color+'"></div>'
-        +'<div class="subcat-header-name">'+escHtml(cat.label)+catAllocTag(cat)+'</div>'
+        +'<div class="subcat-header-name">'+escHtml(cat.label)+'</div>'
         +'<div style="font-size:13px;color:var(--hint);font-weight:400;margin-right:4px">'+fmt(headerAmt,2)+(isAnnual?'/yr':'/mo')+'</div>'
         +catEditBtns
         +'<div style="font-size:12px;color:var(--muted);margin-left:4px">'+(open?'▾':'▸')+'</div></div>';
@@ -1797,8 +1797,12 @@ var ALLOCS=[
 ];
 function allocLabel(id){var a=ALLOCS.find(function(x){return x.id===id;});return a?a.label:'Unassigned';}
 function allocColor(id){var a=ALLOCS.find(function(x){return x.id===id;});return a?a.color:'#a0a09b';}
+var BUDGET_ALLOCS=['needs','wants'];
 function allocOptionsHtml(sel){
-  return '<option value="">Unassigned</option>'+ALLOCS.map(function(a){return '<option value="'+a.id+'"'+(a.id===sel?' selected':'')+'>'+a.label+'</option>';}).join('');
+  var has=BUDGET_ALLOCS.indexOf(sel)>=0;
+  // Untagged items show a non-selectable prompt, so saving without choosing never changes anything.
+  return (has?'':'<option value="" disabled selected hidden>Select…</option>')
+    +BUDGET_ALLOCS.map(function(id){return '<option value="'+id+'"'+(id===sel?' selected':'')+'>'+allocLabel(id)+'</option>';}).join('');
 }
 // A subcategory's own allocation wins; otherwise it inherits its category's.
 function subAllocOf(cat,sub){return (sub&&sub.alloc)||(cat&&cat.alloc)||'';}
@@ -1811,14 +1815,14 @@ function catAllocTag(cat){
   return allocTag(keys[0]);
 }
 function fmtS(n,d){return (Number(n)<-0.004?'-':'')+fmt(n,d);}
+// "Invested" accounts are the ones whose Type is set to Invested in Net Worth.
 function isInvAcct(id){
   var a=accounts.find(function(x){return x.id===id;});
-  return !!a&&/roth|401|\bira\b|fidelity|brokerage|invest/i.test((a.label||'')+' '+(a.sub||''));
+  return !!a&&a.liquid===false;
 }
 function allocCompute(from,to){
-  var B={};
-  ALLOCS.forEach(function(a){B[a.id]={id:a.id,total:0,cats:{},accts:{}};});
-  B.unassigned={id:'unassigned',total:0,cats:{},accts:{}};
+  var B={needs:{id:'needs',total:0,cats:{}},wants:{id:'wants',total:0,cats:{}},unassigned:{id:'unassigned',total:0,cats:{}},
+         savings:{id:'savings',total:0,cats:{}},investments:{id:'investments',total:0,cats:{},accts:{}}};
   var earned=0,spent=0,invested=0;
   txns.forEach(function(t){
     if(t.date<from||t.date>to)return;
@@ -1827,8 +1831,8 @@ function allocCompute(from,to){
     if(t.type==='expense'){
       var cat=schema.find(function(c){return c.id===t.catId;});
       var sub=cat?cat.subs.find(function(sb){return sb.id===t.subId;}):null;
-      var al=subAllocOf(cat,sub)||'unassigned';
-      var b=B[al]||B.unassigned;
+      var al=subAllocOf(cat,sub);
+      var b=(al==='needs'||al==='wants')?B[al]:B.unassigned;
       var info=liveCatInfo(t);
       b.total+=amt;spent+=amt;
       var ck=t.catId||'other';
@@ -1839,18 +1843,20 @@ function allocCompute(from,to){
       se.total+=amt;se.txns.push(t);
       return;
     }
-    // Money moved into a Roth IRA / 401k / brokerage account counts as investing.
+    // Money moved into any account whose type is Invested counts as investing.
     if(t.type==='transfer'&&(t.kind==='transfer'||!t.kind)&&isInvAcct(t.toAcctId)&&!isInvAcct(t.fromAcctId)){
       var acct=accounts.find(function(x){return x.id===t.toAcctId;});
       B.investments.total+=amt;invested+=amt;
-      var ae=B.investments.accts[t.toAcctId]||(B.investments.accts[t.toAcctId]={id:t.toAcctId,label:acct?acct.label:'Investment account',total:0,txns:[]});
+      var ae=B.investments.accts[t.toAcctId]||(B.investments.accts[t.toAcctId]={id:t.toAcctId,label:acct?acct.label:'Invested account',total:0,txns:[]});
       ae.total+=amt;ae.txns.push(t);
     }
   });
-  // Anything earned but neither spent nor invested is savings.
-  var unspent=earned-spent-invested;
-  B.savings.total+=unspent;
-  return {earned:earned,spent:spent,invested:invested,unspent:unspent,B:B};
+  // Savings = earned - needs - wants (untagged spending is subtracted too so nothing disappears).
+  var savings=earned-spent;
+  // Liquid = what's left of savings after investing; never negative.
+  var liquid=Math.max(0,savings-invested);
+  B.savings.total=savings;
+  return {earned:earned,spent:spent,invested:invested,liquid:liquid,savings:savings,B:B};
 }
 function monthRangeOf(k){
   var y=parseInt(k.slice(0,4)),m=parseInt(k.slice(5,7));
@@ -1957,45 +1963,56 @@ function allocCatRows(b){
   });
   return h;
 }
+function allocSubRow(key,label,color,total,earned,open,clickable){
+  var pct=earned>0?Math.round(total/earned*100):0,neg=total<-0.004;
+  return '<div class="bva-row"'+(clickable?' style="cursor:pointer" onclick="event.stopPropagation();toggleAlloc(\''+key+'\')"':'')+'><div class="bva-name">'+label+'</div>'
+    +'<div class="bva-bar-wrap"><div class="bva-bar" style="width:'+Math.max(0,Math.min(100,pct))+'%;background:'+color+'"></div></div>'
+    +'<div class="bva-nums"'+(neg?' style="color:var(--red)"':'')+'>'+fmtS(total)+' ('+pct+'%)</div>'
+    +'<div style="font-size:11px;color:var(--hint);margin-left:2px;flex-shrink:0;width:9px">'+(clickable?(open?'▾':'▸'):'')+'</div></div>';
+}
 function renderAllocResult(){
   var resEl=document.getElementById('al-result');if(!resEl)return;
   var rg=allocRange();
   if(!rg.from||!rg.to){resEl.innerHTML='<div style="color:var(--muted);font-size:13px">Pick both dates.</div>';return;}
   if(rg.from>rg.to){resEl.innerHTML='<div style="color:var(--red);font-size:13px">"From" must be on or before "To".</div>';return;}
-  var res=allocCompute(rg.from,rg.to),earned=res.earned;
+  var res=allocCompute(rg.from,rg.to),earned=res.earned,B=res.B;
   var html='<div style="font-size:24px;font-weight:700;color:var(--green)">'+fmt(earned)+'</div>';
   html+='<div style="font-size:12px;color:var(--muted);margin-bottom:10px">money earned · '+fmtDate(rg.from)+' – '+fmtDate(rg.to)+'</div>';
-  var rows=Object.keys(res.B).map(function(k){return res.B[k];}).filter(function(b){return b.id!=='unassigned'||Math.abs(b.total)>0.005;})
+  var rows=[B.savings,B.needs,B.wants,B.unassigned].filter(function(b){return b.id!=='unassigned'||Math.abs(b.total)>0.005;})
     .sort(function(x,y){return y.total-x.total;});
   rows.forEach(function(b){
-    var pct=earned>0?Math.round(b.total/earned*100):0,open=!!allocOpen['a|'+b.id],neg=b.total<-0.004;
-    var barW=Math.max(0,Math.min(100,pct));
-    html+='<div class="bva-row" style="cursor:pointer" onclick="toggleAlloc(\'a|'+b.id+'\')"><div class="bva-name">'+allocLabel(b.id)+'</div>'
-      +'<div class="bva-bar-wrap"><div class="bva-bar" style="width:'+barW+'%;background:'+allocColor(b.id)+'"></div></div>'
-      +'<div class="bva-nums"'+(neg?' style="color:var(--red)"':'')+'>'+fmtS(b.total)+' ('+pct+'%)</div>'
-      +'<div style="font-size:11px;color:var(--hint);margin-left:2px;flex-shrink:0">'+(open?'▾':'▸')+'</div></div>';
-    if(open){
-      html+='<div style="padding:0 0 6px 12px">';
-      if(b.id==='savings'){
-        html+='<div class="bva-row" style="padding:8px 0"><div class="bva-name" style="font-size:13px;width:auto;max-width:none">Unspent income</div>'
-          +'<div class="bva-nums" style="margin-left:auto;'+(res.unspent<-0.004?'color:var(--red)':'color:var(--text)')+'">'+fmtS(res.unspent)+'</div><div style="width:16px"></div></div>';
-      }
-      if(b.id==='investments'){
-        Object.keys(b.accts).map(function(k){return b.accts[k];}).sort(function(x,y){return y.total-x.total;}).forEach(function(ae){
-          var ak='i|'+ae.id,aOpen=!!allocOpen[ak];
-          html+='<div class="bva-row" style="cursor:pointer" onclick="event.stopPropagation();toggleAlloc(\''+ak+'\')"><div class="bva-name">'+escHtml(ae.label)+'</div>'
-            +'<div class="bva-bar-wrap" style="background:transparent"></div>'
-            +'<div class="bva-nums" style="color:var(--text)">'+fmt(ae.total)+'</div>'
-            +'<div style="font-size:11px;color:var(--hint);margin-left:2px;flex-shrink:0">'+(aOpen?'▾':'▸')+'</div></div>';
-          if(aOpen)html+='<div style="padding:0 0 6px 12px">'+allocTxnRows(ae.txns,'openEditActivityModal')+'</div>';
-        });
-      }
+    var open=!!allocOpen['a|'+b.id];
+    html+=allocSubRow('a|'+b.id,allocLabel(b.id),allocColor(b.id),b.total,earned,open,true);
+    if(!open)return;
+    html+='<div style="padding:0 0 6px 12px">';
+    if(b.id==='savings'){
+      // Savings splits into Investments and Liquid
+      var parts=[{k:'investments',label:'Investments',color:allocColor('investments'),total:res.invested,clickable:true},
+                 {k:'liquid',label:'Liquid',color:'#85B7EB',total:res.liquid,clickable:false}].sort(function(x,y){return y.total-x.total;});
+      parts.forEach(function(p){
+        var pk='v|'+p.k,pOpen=!!allocOpen[pk];
+        html+=allocSubRow(pk,p.label,p.color,p.total,earned,pOpen,p.clickable);
+        if(p.k==='investments'&&pOpen){
+          html+='<div style="padding:0 0 6px 12px">';
+          var accts=Object.keys(B.investments.accts).map(function(k){return B.investments.accts[k];}).sort(function(x,y){return y.total-x.total;});
+          if(!accts.length)html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">No transfers into Invested accounts this period.</div>';
+          accts.forEach(function(ae){
+            var ak='i|'+ae.id,aOpen=!!allocOpen[ak];
+            html+='<div class="bva-row" style="cursor:pointer;padding:8px 0" onclick="event.stopPropagation();toggleAlloc(\''+ak+'\')"><div class="bva-name" style="font-size:13px;font-weight:400">'+escHtml(ae.label)+'</div>'
+              +'<div class="bva-nums" style="color:var(--text);margin-left:auto">'+fmt(ae.total)+'</div>'
+              +'<div style="font-size:10px;color:var(--hint);margin-left:6px;flex-shrink:0">'+(aOpen?'▾':'▸')+'</div></div>';
+            if(aOpen)html+='<div style="padding:0 0 6px 12px">'+allocTxnRows(ae.txns,'openEditActivityModal')+'</div>';
+          });
+          html+='</div>';
+        }
+      });
+    } else {
       var catHtml=allocCatRows(b);
       html+=catHtml;
-      if(b.id==='unassigned')html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">These subcategories have no money allocation yet. Set one with the ✎ button in the Budget tab.</div>';
-      if(!catHtml&&b.id!=='savings'&&b.id!=='investments')html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">Nothing here for this period.</div>';
-      html+='</div>';
+      if(b.id==='unassigned')html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">These subcategories have no money allocation category yet. Set one with the ✎ button in the Budget tab.</div>';
+      else if(!catHtml)html+='<div style="font-size:12px;color:var(--muted);padding:6px 0">Nothing here for this period.</div>';
     }
+    html+='</div>';
   });
   resEl.innerHTML=html;
 }
@@ -2723,7 +2740,7 @@ function openAddCatModal(presetFixed){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
     +'<div><label class="flabel">Color</label><input type="color" id="m-color" value="#7F77DD" style="width:60px;height:41px"></div>'
     +'<div><label class="flabel">Fixed / Variable</label><select id="m-fixed"><option value="0"'+(presetFixed==='1'?'':' selected')+'>Variable</option><option value="1"'+(presetFixed==='1'?' selected':'')+'>Fixed</option></select></div></div>'
-    +'<div><label class="flabel">Money allocation</label><select id="m-alloc">'+allocOptionsHtml('')+'</select></div>'
+    +'<div><label class="flabel">Money allocation category</label><select id="m-alloc">'+allocOptionsHtml('')+'</select></div>'
     +'</div><div class="modal-footer"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn" onclick="confirmAddCat()">Add</button></div>');
 }
 function confirmAddCat(){
@@ -2740,7 +2757,7 @@ function openEditCatModal(ci){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
     +'<div><label class="flabel">Color</label><input type="color" id="m-color" value="'+cat.color+'" style="width:60px;height:41px"></div>'
     +'<div><label class="flabel">Fixed / Variable</label><select id="m-fixed"><option value="0"'+(cat.fixed?'':' selected')+'>Variable</option><option value="1"'+(cat.fixed?' selected':'')+'>Fixed</option></select></div></div>'
-    +'<div><label class="flabel">Money allocation (applies to all its subcategories)</label><select id="m-alloc">'+allocOptionsHtml(cat.alloc||'')+'</select></div>'
+    +'<div><label class="flabel">Money allocation category</label><select id="m-alloc">'+allocOptionsHtml(cat.alloc||'')+'</select></div>'
     +'</div><div class="modal-footer"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn" onclick="confirmEditCat('+ci+')">Save</button></div>');
 }
 function confirmEditCat(ci){
@@ -2750,9 +2767,9 @@ function confirmEditCat(ci){
   applyStructuralChange(function(cats){var c=cats.find(function(x){return x.id===catId;});if(c){c.label=name;c.color=color;c.fixed=fixed;
     // Changing the category's allocation autofills every subcategory under it.
     // Leaving it unchanged keeps any per-subcategory overrides intact.
-    if(newAl!==(c.alloc||'')){
-      if(newAl)c.alloc=newAl;else delete c.alloc;
-      c.subs.forEach(function(sb){if(newAl)sb.alloc=newAl;else delete sb.alloc;});
+    if(newAl&&newAl!==(c.alloc||'')){
+      c.alloc=newAl;
+      c.subs.forEach(function(sb){sb.alloc=newAl;});
     }}});
   persist();closeModal();renderBudget();toast('Updated!');
 }
@@ -2771,7 +2788,7 @@ function openAddSubModal(ci){
     +'<div><label class="flabel">Frequency</label><select id="m-freq"><option value="monthly">Monthly</option><option value="annual">Annual</option></select></div></div>'
     +'<div id="m-extra-toggle-wrap"><button type="button" class="btn btn-o btn-sm" onclick="showExtraFeeField()">+ Add annual fee</button></div>'
     +'<div id="m-extra-wrap" style="display:none"><label class="flabel">Annual fee ($)</label><input type="number" id="m-extra" min="0" placeholder="0"></div>'
-    +'<div><label class="flabel">Money allocation</label><select id="m-alloc">'+allocOptionsHtml(schema[ci].alloc||'')+'</select></div>'
+    +'<div><label class="flabel">Money allocation category</label><select id="m-alloc">'+allocOptionsHtml(schema[ci].alloc||'')+'</select></div>'
     +'</div><div class="modal-footer"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn" onclick="confirmAddSub('+ci+')">Add</button></div>');
 }
 function showExtraFeeField(){
@@ -2805,7 +2822,7 @@ function openEditSubModal(ci,si){
     +'<div><label class="flabel">Frequency</label><select id="m-freq"><option value="monthly"'+(sub.freq==='monthly'?' selected':'')+'>Monthly</option><option value="annual"'+(sub.freq==='annual'?' selected':'')+'>Annual</option></select></div></div>'
     +'<div id="m-extra-toggle-wrap" style="'+(hasExtra?'display:none':'')+'"><button type="button" class="btn btn-o btn-sm" onclick="showExtraFeeField()">+ Add annual fee</button></div>'
     +'<div id="m-extra-wrap" style="'+(hasExtra?'':'display:none')+'"><label class="flabel">Annual fee ($)</label><input type="number" id="m-extra" value="'+(sub.annualExtra||0)+'" min="0"></div>'
-    +'<div><label class="flabel">Money allocation</label><select id="m-alloc">'+allocOptionsHtml(subAllocOf(schema[ci],sub))+'</select></div>'
+    +'<div><label class="flabel">Money allocation category</label><select id="m-alloc">'+allocOptionsHtml(subAllocOf(schema[ci],sub))+'</select></div>'
     +'</div><div class="modal-footer"><button class="btn btn-o" onclick="closeModal()">Cancel</button><button class="btn" onclick="confirmEditSub('+ci+','+si+')">Save</button></div>');
 }
 function confirmEditSub(ci,si){
@@ -2822,7 +2839,7 @@ function confirmEditSub(ci,si){
   var canonicalAmt=isAnnual?(freq==='annual'?entered:entered/mult):(freq==='annual'?entered*mult:entered);
   sub.label=name;sub.amount=canonicalAmt;sub.freq=freq;
   var subAl2=document.getElementById('m-alloc').value;
-  if(subAl2)sub.alloc=subAl2;else delete sub.alloc;
+  if(subAl2)sub.alloc=subAl2;
   if(extra>0)sub.annualExtra=extra;else delete sub.annualExtra;
   persist();closeModal();renderBudget();toast('Updated!');
 }
